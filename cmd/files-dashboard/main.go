@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,14 @@ type dashboardData struct {
 	RepoURL   string
 	Branch    string
 	OutputDir string
+}
+
+// urlEncodePath encodes a file path for use in URLs, replacing spaces and special characters
+func urlEncodePath(path string) string {
+	// Convert backslashes to forward slashes for consistency
+	path = filepath.ToSlash(path)
+	// URL encode the path
+	return url.PathEscape(path)
 }
 
 // getGitHubURL tries to get the GitHub repository URL and current branch
@@ -156,6 +165,37 @@ func main() {
 			htmlOutput = output[:len(output)-len(filepath.Ext(output))] + ".html"
 		}
 
+		// Adjust paths to be relative to the HTML output file location
+		htmlOutputDir := filepath.Dir(htmlOutput)
+		adjustedHTMLSections := make([]section, len(ordered))
+
+		for i, sec := range ordered {
+			adjustedFiles := make([]fileEntry, len(sec.Files))
+
+			for j, file := range sec.Files {
+				// Calculate path from HTML output location to source files
+				absSourcePath := filepath.Join(source, file.Path)
+				relPath, _ := filepath.Rel(htmlOutputDir, absSourcePath)
+
+				zipPath := ""
+				if file.Zip != "" {
+					absZipPath := filepath.Join(source, file.Zip)
+					zipPath, _ = filepath.Rel(htmlOutputDir, absZipPath)
+				}
+
+				adjustedFiles[j] = fileEntry{
+					Name: file.Name,
+					Path: urlEncodePath(relPath),
+					Zip:  urlEncodePath(zipPath),
+				}
+			}
+
+			adjustedHTMLSections[i] = section{
+				Folder: sec.Folder,
+				Files:  adjustedFiles,
+			}
+		}
+
 		f, err := os.Create(htmlOutput)
 		if err != nil {
 			log.Fatalf("create: %v", err)
@@ -163,7 +203,7 @@ func main() {
 		defer f.Close()
 
 		tmpl := template.Must(template.New("dashboard").Parse(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Files Dashboard</title><style>body{font-family:Arial,sans-serif;margin:20px;}table{border-collapse:collapse;width:100%;margin-bottom:30px;}th,td{border:1px solid #ddd;padding:6px;}th{background:#f4f4f4;text-align:left;}h2{margin-top:40px;border-bottom:2px solid #eee;padding-bottom:4px;}a{text-decoration:none;color:#0366d6;}a:hover{text-decoration:underline;}</style></head><body><h1>Files Dashboard</h1>{{range .}}<h2>{{.Folder}}</h2><table><thead><tr><th>File Name</th><th>Download</th><th>Source Zip</th></tr></thead><tbody>{{range .Files}}<tr><td>{{.Name}}</td><td><a href="{{.Path}}" download>Download</a></td><td>{{if .Zip}}<a href="{{.Zip}}" download>Zip</a>{{else}}-{{end}}</td></tr>{{end}}</tbody></table>{{end}}</body></html>`))
-		if err := tmpl.Execute(f, ordered); err != nil {
+		if err := tmpl.Execute(f, adjustedHTMLSections); err != nil {
 			log.Fatalf("template: %v", err)
 		}
 		log.Printf("dashboard written: %s", htmlOutput)
@@ -199,17 +239,17 @@ func main() {
 
 				adjustedFiles[j] = fileEntry{
 					Name: file.Name,
-					Path: relPath,
-					Zip:  zipPath,
+					Path: urlEncodePath(relPath),
+					Zip:  urlEncodePath(zipPath),
 				}
 
-				// For GitHub URLs: prepend source path to file path
+				// For GitHub URLs: prepend source path to file path and URL encode
 				githubFiles[j] = fileEntry{
 					Name: file.Name,
-					Path: filepath.Join(source, file.Path),
+					Path: urlEncodePath(filepath.Join(source, file.Path)),
 					Zip: func() string {
 						if file.Zip != "" {
-							return filepath.Join(source, file.Zip)
+							return urlEncodePath(filepath.Join(source, file.Zip))
 						}
 						return ""
 					}(),
