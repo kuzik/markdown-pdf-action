@@ -31,7 +31,13 @@ import (
 type job struct {
 	Source string `yaml:"source"`
 	Output string `yaml:"output"`
-	Type   string `yaml:"type"` // single | subfolders
+	Type   string `yaml:"type"` // single | subfolders | combine
+}
+
+type renderConfig struct {
+	mdPath  string
+	outPath string
+	baseDir string
 }
 
 func main() {
@@ -39,177 +45,285 @@ func main() {
 	flag.StringVar(&configPath, "config", "render.yaml", "Path to YAML config describing render jobs")
 	flag.Parse()
 
-	cfgBytes, err := os.ReadFile(configPath)
+	jobs, err := loadConfig(configPath)
 	if err != nil {
-		log.Fatalf("read config: %v", err)
-	}
-	var jobs []job
-	if err := yaml.Unmarshal(cfgBytes, &jobs); err != nil {
-		log.Fatalf("parse yaml: %v", err)
+		log.Fatalf("Failed to load config: %v", err)
 	}
 
+	executeJobs(jobs)
+}
+
+// loadConfig reads and parses the YAML configuration file
+func loadConfig(configPath string) ([]job, error) {
+	cfgBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+
+	var jobs []job
+	if err := yaml.Unmarshal(cfgBytes, &jobs); err != nil {
+		return nil, fmt.Errorf("parse yaml: %w", err)
+	}
+
+	return jobs, nil
+}
+
+// executeJobs processes all jobs from the configuration
+func executeJobs(jobs []job) {
 	for _, j := range jobs {
-		switch j.Type {
-		case "subfolders":
-			if err := renderSubfolders(j); err != nil {
-				log.Printf("job failed (subfolders %s): %v", j.Source, err)
-			}
-		case "single":
-			if err := renderSingle(j); err != nil {
-				log.Printf("job failed (single %s): %v", j.Source, err)
-			}
-		case "combine":
-			if err := renderCombine(j); err != nil {
-				log.Printf("job failed (combine %s): %v", j.Source, err)
-			}
-		default:
-			log.Printf("unknown job type %q for source %s", j.Type, j.Source)
+		if err := executeJob(j); err != nil {
+			log.Printf("Job failed (%s %s): %v", j.Type, j.Source, err)
 		}
 	}
 }
 
+// executeJob routes a job to the appropriate handler based on its type
+func executeJob(j job) error {
+	switch j.Type {
+	case "subfolders":
+		return renderSubfolders(j)
+	case "single":
+		return renderSingle(j)
+	case "combine":
+		return renderCombine(j)
+	default:
+		return fmt.Errorf("unknown job type %q", j.Type)
+	}
+}
+
+// renderSubfolders renders each README.md in matched subdirectories as a separate PDF
 func renderSubfolders(j job) error {
-	matches, err := doublestar.Glob(os.DirFS("."), j.Source)
+	matches, err := findMatches(j.Source)
 	if err != nil {
 		return err
 	}
-	if len(matches) == 0 {
-		return fmt.Errorf("no matches for %s", j.Source)
-	}
-	if err := os.MkdirAll(j.Output, 0o755); err != nil {
-		return err
-	}
-	for _, m := range matches {
-		if filepath.Base(m) == "README.md" {
-			// Use parent folder name for PDF to avoid conflicts
-			folder := filepath.Dir(m)
-			folderName := filepath.Base(folder)
-			outPDF := filepath.Join(j.Output, folderName+".pdf")
 
-			if err := renderMarkdownToPDF(m, outPDF, folder); err != nil {
-				log.Printf("render %s: %v", m, err)
-			}
-			if _, err := os.Stat(filepath.Join(folder, "src")); err == nil {
-				zipName := filepath.Join(j.Output, folderName+"_src.zip")
-				if err := zipFolder(filepath.Join(folder, "src"), zipName); err != nil {
-					log.Printf("zip src %s: %v", folder, err)
-				}
-			}
+	if err := os.MkdirAll(j.Output, 0o755); err != nil {
+		return fmt.Errorf("create output directory: %w", err)
+	}
+
+	for _, m := range matches {
+		if filepath.Base(m) != "README.md" {
+			continue
+		}
+
+		folder := filepath.Dir(m)
+		folderName := filepath.Base(folder)
+		outPDF := filepath.Join(j.Output, folderName+".pdf")
+
+		if err := renderMarkdownToPDF(renderConfig{
+			mdPath:  m,
+			outPath: outPDF,
+			baseDir: folder,
+		}); err != nil {
+			log.Printf("Render %s: %v", m, err)
+			continue
+		}
+
+		// Create source zip if src directory exists
+		if err := zipSourceIfExists(folder, j.Output, folderName); err != nil {
+			log.Printf("Zip src %s: %v", folder, err)
 		}
 	}
+
 	return nil
 }
 
-func renderCombine(j job) error {
-	matches, err := doublestar.Glob(os.DirFS("."), j.Source)
+// renderSingle combines multiple markdown files into a single PDF
+func renderSingle(j job) error {
+	matches, err := findMatches(j.Source)
 	if err != nil {
 		return err
 	}
-	if len(matches) == 0 {
-		return fmt.Errorf("no matches for %s", j.Source)
-	}
+
 	if err := os.MkdirAll(filepath.Dir(j.Output), 0o755); err != nil {
+		return fmt.Errorf("create output directory: %w", err)
+	}
+
+	// Combine all matched markdown files
+	combined, err := combineMarkdownFiles(matches, "\n\n")
+	if err != nil {
 		return err
 	}
 
-	// Filter only README.md files and sort them
-	var readmes []string
-	for _, m := range matches {
-		if filepath.Base(m) == "README.md" {
-			readmes = append(readmes, m)
-		}
+	// Determine base directory for image resolution
+	baseDir := ""
+	if len(matches) > 0 {
+		baseDir = filepath.Dir(matches[0])
 	}
 
+	return renderCombinedMarkdown(combined, j.Output, baseDir)
+}
+
+// renderCombine merges multiple README.md files with folder headers into a single PDF
+func renderCombine(j job) error {
+	matches, err := findMatches(j.Source)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(j.Output), 0o755); err != nil {
+		return fmt.Errorf("create output directory: %w", err)
+	}
+
+	// Filter only README.md files
+	readmes := filterREADMEs(matches)
 	if len(readmes) == 0 {
 		return fmt.Errorf("no README.md files found for %s", j.Source)
 	}
 
-	// Combine all README.md files with folder names as headers
-	var combined []string
-	for _, m := range readmes {
-		folder := filepath.Dir(m)
-		folderName := filepath.Base(folder)
-
-		// Add folder name as a header
-		combined = append(combined, fmt.Sprintf("# %s\n", folderName))
-
-		// Read and add the content
-		b, err := os.ReadFile(m)
-		if err != nil {
-			log.Printf("warning: failed to read %s: %v", m, err)
-			continue
-		}
-		combined = append(combined, string(b))
-	}
-
-	tmpFile, err := os.CreateTemp("", "combined-*.md")
+	// Combine with folder headers
+	combined, err := combineREADMEsWithHeaders(readmes)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmpFile.Name())
-	if _, err := tmpFile.WriteString(strings.Join(combined, "\n\n---\n\n")); err != nil {
-		tmpFile.Close()
-		return err
-	}
-	tmpFile.Close()
 
-	// Use the first match's directory as base for resolving images
+	// Use first README's directory as base for images
 	baseDir := ""
 	if len(readmes) > 0 {
 		baseDir = filepath.Dir(readmes[0])
 	}
 
-	return renderMarkdownToPDF(tmpFile.Name(), j.Output, baseDir)
+	return renderCombinedMarkdown(combined, j.Output, baseDir)
 }
 
-func renderSingle(j job) error {
-	matches, err := doublestar.Glob(os.DirFS("."), j.Source)
+// findMatches finds all files matching the glob pattern
+func findMatches(pattern string) ([]string, error) {
+	matches, err := doublestar.Glob(os.DirFS("."), pattern)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("glob pattern: %w", err)
 	}
 	if len(matches) == 0 {
-		return fmt.Errorf("no matches for %s", j.Source)
+		return nil, fmt.Errorf("no matches for %s", pattern)
 	}
-	if err := os.MkdirAll(filepath.Dir(j.Output), 0o755); err != nil {
-		return err
-	}
-	var combined []string
-	for _, m := range matches {
-		b, err := os.ReadFile(m)
-		if err != nil {
-			return err
+	return matches, nil
+}
+
+// filterREADMEs returns only README.md files from the list
+func filterREADMEs(files []string) []string {
+	var readmes []string
+	for _, f := range files {
+		if filepath.Base(f) == "README.md" {
+			readmes = append(readmes, f)
 		}
-		combined = append(combined, string(b))
 	}
+	return readmes
+}
+
+// combineMarkdownFiles reads and combines multiple markdown files
+func combineMarkdownFiles(files []string, separator string) (string, error) {
+	var parts []string
+	for _, f := range files {
+		content, err := os.ReadFile(f)
+		if err != nil {
+			return "", fmt.Errorf("read %s: %w", f, err)
+		}
+		parts = append(parts, string(content))
+	}
+	return strings.Join(parts, separator), nil
+}
+
+// combineREADMEsWithHeaders combines README files with folder name headers
+func combineREADMEsWithHeaders(readmes []string) (string, error) {
+	var parts []string
+	for _, readme := range readmes {
+		folder := filepath.Dir(readme)
+		folderName := filepath.Base(folder)
+
+		// Add folder name as header
+		parts = append(parts, fmt.Sprintf("# %s\n", folderName))
+
+		// Read and add content
+		content, err := os.ReadFile(readme)
+		if err != nil {
+			log.Printf("Warning: failed to read %s: %v", readme, err)
+			continue
+		}
+		parts = append(parts, string(content))
+	}
+	return strings.Join(parts, "\n\n---\n\n"), nil
+}
+
+// renderCombinedMarkdown writes combined markdown to a temp file and renders it
+func renderCombinedMarkdown(content, outputPath, baseDir string) error {
 	tmpFile, err := os.CreateTemp("", "combined-*.md")
 	if err != nil {
-		return err
+		return fmt.Errorf("create temp file: %w", err)
 	}
 	defer os.Remove(tmpFile.Name())
-	if _, err := tmpFile.WriteString(strings.Join(combined, "\n\n")); err != nil {
+
+	if _, err := tmpFile.WriteString(content); err != nil {
 		tmpFile.Close()
-		return err
+		return fmt.Errorf("write temp file: %w", err)
 	}
 	tmpFile.Close()
-	baseDir := ""
-	if len(matches) > 0 {
-		baseDir = filepath.Dir(matches[0])
+
+	return renderMarkdownToPDF(renderConfig{
+		mdPath:  tmpFile.Name(),
+		outPath: outputPath,
+		baseDir: baseDir,
+	})
+}
+
+// zipSourceIfExists creates a zip of the src directory if it exists
+func zipSourceIfExists(folder, outputDir, baseName string) error {
+	srcDir := filepath.Join(folder, "src")
+	if _, err := os.Stat(srcDir); os.IsNotExist(err) {
+		return nil
 	}
-	return renderMarkdownToPDF(tmpFile.Name(), j.Output, baseDir)
+
+	zipName := filepath.Join(outputDir, baseName+"_src.zip")
+	return zipFolder(srcDir, zipName)
 }
 
-func pdfName(md string) string {
-	base := filepath.Base(md)
-	return strings.TrimSuffix(base, filepath.Ext(base)) + ".pdf"
-}
-
-func renderMarkdownToPDF(mdPath, outPath, baseDir string) error {
-	src, err := os.ReadFile(mdPath)
+// renderMarkdownToPDF converts a markdown file to PDF
+func renderMarkdownToPDF(cfg renderConfig) error {
+	// Read markdown source
+	src, err := os.ReadFile(cfg.mdPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("read markdown: %w", err)
 	}
 
-	// Convert markdown to HTML with syntax highlighting
+	// Convert markdown to HTML
+	htmlBody, err := markdownToHTML(src)
+	if err != nil {
+		return fmt.Errorf("convert markdown: %w", err)
+	}
+
+	// Determine base directory for resolving images
+	baseDir := cfg.baseDir
+	if baseDir == "" {
+		baseDir = filepath.Dir(cfg.mdPath)
+	}
+
+	// Embed images as base64 data URLs
+	htmlWithImages, err := embedImagesAsBase64(htmlBody, baseDir)
+	if err != nil {
+		return fmt.Errorf("embed images: %w", err)
+	}
+
+	// Wrap in styled HTML template
+	htmlContent, err := wrapHTML(htmlWithImages, filepath.Base(cfg.mdPath))
+	if err != nil {
+		return fmt.Errorf("wrap HTML: %w", err)
+	}
+
+	// Ensure output directory exists
+	if err := os.MkdirAll(filepath.Dir(cfg.outPath), 0o755); err != nil {
+		return fmt.Errorf("create output directory: %w", err)
+	}
+
+	// Convert HTML to PDF
+	if err := htmlToPDF(htmlContent, cfg.outPath); err != nil {
+		return fmt.Errorf("convert to PDF: %w", err)
+	}
+
+	log.Printf("Rendered: %s", cfg.outPath)
+	return nil
+}
+
+// markdownToHTML converts markdown text to HTML
+func markdownToHTML(src []byte) (string, error) {
 	md := goldmark.New(
 		goldmark.WithExtensions(
 			extension.GFM,
@@ -228,102 +342,266 @@ func renderMarkdownToPDF(mdPath, outPath, baseDir string) error {
 
 	var buf bytes.Buffer
 	if err := md.Convert(src, &buf); err != nil {
-		return fmt.Errorf("markdown convert: %w", err)
+		return "", err
 	}
 
-	// Determine base directory for resolving relative image paths
-	if baseDir == "" {
-		baseDir = filepath.Dir(mdPath)
-	}
-
-	// Embed images as base64 data URLs to avoid file:// access issues in Chrome
-	htmlWithImages, err := embedImagesAsBase64(buf.String(), baseDir)
-	if err != nil {
-		return fmt.Errorf("embed images: %w", err)
-	}
-
-	// Wrap in HTML template with GitHub styling
-	htmlContent, err := wrapHTML(htmlWithImages, filepath.Base(mdPath))
-	if err != nil {
-		return err
-	}
-
-	// Convert HTML to PDF using Chrome
-	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
-		return err
-	}
-
-	return htmlToPDF(htmlContent, outPath)
+	return buf.String(), nil
 }
 
-// embedImagesAsBase64 replaces relative image paths in HTML with base64-encoded data URLs
+// embedImagesAsBase64 replaces relative image paths with base64 data URLs
 func embedImagesAsBase64(htmlContent, baseDir string) (string, error) {
-	// Pattern to match img tags with src attributes
 	imgRegex := regexp.MustCompile(`<img\s+[^>]*src=["']([^"']+)["'][^>]*>`)
 
 	result := imgRegex.ReplaceAllStringFunc(htmlContent, func(imgTag string) string {
-		// Extract the src attribute value
-		srcRegex := regexp.MustCompile(`src=["']([^"']+)["']`)
-		matches := srcRegex.FindStringSubmatch(imgTag)
-		if len(matches) < 2 {
+		srcPath := extractSrcAttribute(imgTag)
+		if srcPath == "" {
 			return imgTag
 		}
 
-		srcPath := matches[1]
-
-		// Skip if it's already a data URL or absolute URL
-		if strings.HasPrefix(srcPath, "data:") ||
-			strings.HasPrefix(srcPath, "http://") ||
-			strings.HasPrefix(srcPath, "https://") {
+		// Skip data URLs and absolute URLs
+		if isAbsoluteOrDataURL(srcPath) {
 			return imgTag
 		}
 
-		// Resolve relative path
-		imagePath := filepath.Join(baseDir, srcPath)
-
-		// Read image file
-		imageData, err := os.ReadFile(imagePath)
+		// Convert to data URL
+		dataURL, err := imageToDataURL(srcPath, baseDir)
 		if err != nil {
-			log.Printf("Warning: failed to read image %s: %v", imagePath, err)
+			log.Printf("Warning: failed to embed image %s: %v", srcPath, err)
 			return imgTag
 		}
 
-		// Determine MIME type from extension
-		ext := strings.ToLower(filepath.Ext(imagePath))
-		mimeType := mime.TypeByExtension(ext)
-		if mimeType == "" {
-			// Default to common types
-			switch ext {
-			case ".png":
-				mimeType = "image/png"
-			case ".jpg", ".jpeg":
-				mimeType = "image/jpeg"
-			case ".gif":
-				mimeType = "image/gif"
-			case ".svg":
-				mimeType = "image/svg+xml"
-			case ".webp":
-				mimeType = "image/webp"
-			default:
-				mimeType = "image/png"
-			}
-		}
-
-		// Encode to base64
-		base64Data := base64.StdEncoding.EncodeToString(imageData)
-		dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data)
-
-		// Replace the src attribute with the data URL
-		newImgTag := srcRegex.ReplaceAllString(imgTag, fmt.Sprintf(`src="%s"`, dataURL))
-
-		return newImgTag
+		return replaceImageSrc(imgTag, dataURL)
 	})
 
 	return result, nil
 }
 
+// extractSrcAttribute extracts the src value from an img tag
+func extractSrcAttribute(imgTag string) string {
+	srcRegex := regexp.MustCompile(`src=["']([^"']+)["']`)
+	matches := srcRegex.FindStringSubmatch(imgTag)
+	if len(matches) < 2 {
+		return ""
+	}
+	return matches[1]
+}
+
+// isAbsoluteOrDataURL checks if a URL is absolute or a data URL
+func isAbsoluteOrDataURL(url string) bool {
+	return strings.HasPrefix(url, "data:") ||
+		strings.HasPrefix(url, "http://") ||
+		strings.HasPrefix(url, "https://")
+}
+
+// imageToDataURL reads an image and converts it to a base64 data URL
+func imageToDataURL(srcPath, baseDir string) (string, error) {
+	imagePath := filepath.Join(baseDir, srcPath)
+
+	imageData, err := os.ReadFile(imagePath)
+	if err != nil {
+		return "", err
+	}
+
+	mimeType := getMimeType(imagePath)
+	base64Data := base64.StdEncoding.EncodeToString(imageData)
+
+	return fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data), nil
+}
+
+// getMimeType determines the MIME type from file extension
+func getMimeType(filePath string) string {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	mimeType := mime.TypeByExtension(ext)
+
+	if mimeType != "" {
+		return mimeType
+	}
+
+	// Fallback to common types
+	mimeTypes := map[string]string{
+		".png":  "image/png",
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".gif":  "image/gif",
+		".svg":  "image/svg+xml",
+		".webp": "image/webp",
+	}
+
+	if mt, ok := mimeTypes[ext]; ok {
+		return mt
+	}
+
+	return "image/png" // default
+}
+
+// replaceImageSrc replaces the src attribute in an img tag
+func replaceImageSrc(imgTag, newSrc string) string {
+	srcRegex := regexp.MustCompile(`src=["']([^"']+)["']`)
+	return srcRegex.ReplaceAllString(imgTag, fmt.Sprintf(`src="%s"`, newSrc))
+}
+
+// wrapHTML wraps HTML content in a styled template
 func wrapHTML(content, title string) (string, error) {
-	tmpl := template.Must(template.New("page").Parse(`<!DOCTYPE html>
+	tmpl := template.Must(template.New("page").Parse(htmlTemplate))
+
+	var buf bytes.Buffer
+	data := struct {
+		Title   string
+		Content template.HTML
+	}{
+		Title:   title,
+		Content: template.HTML(content),
+	}
+
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", err
+	}
+
+	return buf.String(), nil
+}
+
+// htmlToPDF converts HTML content to PDF using headless Chrome
+func htmlToPDF(htmlContent, outPath string) error {
+	// Write HTML to temporary file
+	tmpFile, err := writeTempHTML(htmlContent)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmpFile)
+
+	// Setup Chrome context
+	ctx, cancel, err := setupChromeContext()
+	if err != nil {
+		return err
+	}
+	defer cancel()
+
+	// Generate PDF
+	pdfBuf, err := generatePDF(ctx, tmpFile)
+	if err != nil {
+		return err
+	}
+
+	// Write PDF to output file
+	if err := os.WriteFile(outPath, pdfBuf, 0o644); err != nil {
+		return fmt.Errorf("write pdf: %w", err)
+	}
+
+	return nil
+}
+
+// writeTempHTML writes HTML content to a temporary file
+func writeTempHTML(htmlContent string) (string, error) {
+	tmpFile, err := os.CreateTemp("", "markdown-*.html")
+	if err != nil {
+		return "", fmt.Errorf("create temp file: %w", err)
+	}
+
+	if _, err := tmpFile.WriteString(htmlContent); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		return "", fmt.Errorf("write temp file: %w", err)
+	}
+
+	tmpFile.Close()
+	return tmpFile.Name(), nil
+}
+
+// setupChromeContext creates a Chrome context with appropriate options
+func setupChromeContext() (context.Context, context.CancelFunc, error) {
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.DisableGPU,
+		chromedp.NoSandbox,
+		chromedp.Headless,
+		chromedp.Flag("allow-file-access-from-files", true),
+		chromedp.Flag("disable-web-security", true),
+	)
+
+	if chromeBin := os.Getenv("CHROME_BIN"); chromeBin != "" {
+		opts = append(opts, chromedp.ExecPath(chromeBin))
+	}
+
+	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	ctx, ctxCancel := chromedp.NewContext(allocCtx)
+	ctx, timeoutCancel := context.WithTimeout(ctx, 30*time.Second)
+
+	cancel := func() {
+		timeoutCancel()
+		ctxCancel()
+		allocCancel()
+	}
+
+	return ctx, cancel, nil
+}
+
+// generatePDF uses Chrome to convert HTML file to PDF
+func generatePDF(ctx context.Context, htmlPath string) ([]byte, error) {
+	var pdfBuf []byte
+
+	err := chromedp.Run(ctx,
+		chromedp.Navigate("file://"+htmlPath),
+		chromedp.WaitReady("body", chromedp.ByQuery),
+		chromedp.Sleep(500*time.Millisecond),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			var err error
+			pdfBuf, _, err = page.PrintToPDF().
+				WithPrintBackground(true).
+				WithPreferCSSPageSize(false).
+				WithPaperWidth(8.27).   // A4 width
+				WithPaperHeight(11.69). // A4 height
+				WithMarginTop(0.4).
+				WithMarginBottom(0.4).
+				WithMarginLeft(0.4).
+				WithMarginRight(0.4).
+				Do(ctx)
+			return err
+		}),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("chromedp: %w", err)
+	}
+
+	return pdfBuf, nil
+}
+
+// zipFolder creates a zip archive of a directory
+func zipFolder(srcDir, outZip string) error {
+	f, err := os.Create(outZip)
+	if err != nil {
+		return fmt.Errorf("create zip: %w", err)
+	}
+	defer f.Close()
+
+	zw := zip.NewWriter(f)
+	defer zw.Close()
+
+	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		rel, _ := filepath.Rel(srcDir, path)
+		w, err := zw.Create(rel)
+		if err != nil {
+			return err
+		}
+
+		rf, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer rf.Close()
+
+		_, err = io.Copy(w, rf)
+		return err
+	})
+}
+
+const htmlTemplate = `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -445,118 +723,4 @@ func wrapHTML(content, title string) (string, error) {
 <body>
 {{.Content}}
 </body>
-</html>`))
-
-	var buf bytes.Buffer
-	data := struct {
-		Title   string
-		Content template.HTML // Use template.HTML to prevent escaping HTML tags
-	}{
-		Title:   title,
-		Content: template.HTML(content), // Convert to template.HTML so <img> tags render properly
-	}
-	err := tmpl.Execute(&buf, data)
-	return buf.String(), err
-}
-
-func htmlToPDF(htmlContent, outPath string) error {
-	// Write HTML to a temporary file
-	tmpFile, err := os.CreateTemp("", "markdown-*.html")
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-
-	if _, err := tmpFile.WriteString(htmlContent); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("write temp file: %w", err)
-	}
-	tmpFile.Close()
-
-	// Setup chrome options with file access permissions
-	// --allow-file-access-from-files: Allows Chrome to load local images from file:// URLs
-	// --disable-web-security: Permits cross-origin access for local files
-	// These are necessary because we use <base href="file://..."> to resolve relative image paths
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.DisableGPU,
-		chromedp.NoSandbox,
-		chromedp.Headless,
-		chromedp.Flag("allow-file-access-from-files", true),
-		chromedp.Flag("disable-web-security", true),
-	)
-
-	// Try to find Chrome/Chromium
-	if chromeBin := os.Getenv("CHROME_BIN"); chromeBin != "" {
-		opts = append(opts, chromedp.ExecPath(chromeBin))
-	}
-
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancel()
-
-	ctx, cancel := chromedp.NewContext(allocCtx)
-	defer cancel()
-
-	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	var pdfBuf []byte
-	if err := chromedp.Run(ctx,
-		chromedp.Navigate("file://"+tmpPath),
-		chromedp.WaitReady("body", chromedp.ByQuery),
-		chromedp.Sleep(500*time.Millisecond), // Give time for rendering
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			var err error
-			pdfBuf, _, err = page.PrintToPDF().
-				WithPrintBackground(true).
-				WithPreferCSSPageSize(false).
-				WithPaperWidth(8.27).   // A4 width in inches
-				WithPaperHeight(11.69). // A4 height in inches
-				WithMarginTop(0.4).
-				WithMarginBottom(0.4).
-				WithMarginLeft(0.4).
-				WithMarginRight(0.4).
-				Do(ctx)
-			return err
-		}),
-	); err != nil {
-		return fmt.Errorf("chromedp: %w", err)
-	}
-
-	if err := os.WriteFile(outPath, pdfBuf, 0o644); err != nil {
-		return fmt.Errorf("write pdf: %w", err)
-	}
-
-	log.Printf("wrote %s", outPath)
-	return nil
-}
-
-func zipFolder(srcDir, outZip string) error {
-	f, err := os.Create(outZip)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	zw := zip.NewWriter(f)
-	defer zw.Close()
-	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		rel, _ := filepath.Rel(srcDir, path)
-		w, err := zw.Create(rel)
-		if err != nil {
-			return err
-		}
-		rf, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer rf.Close()
-		_, err = io.Copy(w, rf)
-		return err
-	})
-}
+</html>`
