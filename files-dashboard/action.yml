@@ -16,7 +16,7 @@ inputs:
     default: 'markdown'
 runs:
   using: 'docker'
-  image: 'Dockerfile'
+  image: 'docker://ghcr.io/kuzik/markdown-pdf-action:latest'
   args:
     - dashboard
     - --source
