@@ -1,0 +1,16 @@
+# Example jobs configuration for markdown-to-pdf action
+- source: "example/input/dir/**/*.md"
+  output: "example/output/markdown-pdfs/"
+  type: "subfolders"
+
+- source: "example/input/docs/*.md"
+  output: "example/output/docs.pdf"
+  type: "single"
+
+- source: "example/input/README.md"
+  output: "example/output/README.pdf"
+  type: "single"
+
+- source: "example/input/dir/**/*.md"
+  output: "example/output/combined-projects.pdf"
+  type: "combine"
