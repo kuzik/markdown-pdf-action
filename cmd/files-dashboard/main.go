@@ -127,9 +127,6 @@ func main() {
 		if filepath.Ext(info.Name()) == ".pdf" {
 			if zip, ok := pdfToZip[path]; ok {
 				zipRel = zip
-				log.Printf("Found zip for PDF %s: %s", path, zip)
-			} else {
-				log.Printf("No zip found for PDF %s", path)
 			}
 		}
 
@@ -179,6 +176,56 @@ func main() {
 			mdOutput = output[:len(output)-len(filepath.Ext(output))] + ".md"
 		}
 
+		outputDir := filepath.Dir(mdOutput)
+
+		// Create two sets of sections: one for GitHub URLs (with source prefix), one for relative URLs
+		adjustedSections := make([]section, len(ordered))
+		githubSections := make([]section, len(ordered))
+
+		for i, sec := range ordered {
+			adjustedFiles := make([]fileEntry, len(sec.Files))
+			githubFiles := make([]fileEntry, len(sec.Files))
+
+			for j, file := range sec.Files {
+				// For relative URLs: path from output location to source files
+				absSourcePath := filepath.Join(source, file.Path)
+				relPath, _ := filepath.Rel(outputDir, absSourcePath)
+
+				zipPath := ""
+				if file.Zip != "" {
+					absZipPath := filepath.Join(source, file.Zip)
+					zipPath, _ = filepath.Rel(outputDir, absZipPath)
+				}
+
+				adjustedFiles[j] = fileEntry{
+					Name: file.Name,
+					Path: relPath,
+					Zip:  zipPath,
+				}
+
+				// For GitHub URLs: prepend source path to file path
+				githubFiles[j] = fileEntry{
+					Name: file.Name,
+					Path: filepath.Join(source, file.Path),
+					Zip: func() string {
+						if file.Zip != "" {
+							return filepath.Join(source, file.Zip)
+						}
+						return ""
+					}(),
+				}
+			}
+
+			adjustedSections[i] = section{
+				Folder: sec.Folder,
+				Files:  adjustedFiles,
+			}
+			githubSections[i] = section{
+				Folder: sec.Folder,
+				Files:  githubFiles,
+			}
+		}
+
 		mdFile, err := os.Create(mdOutput)
 		if err != nil {
 			log.Fatalf("create md: %v", err)
@@ -187,20 +234,28 @@ func main() {
 
 		// Build markdown template with GitHub raw URLs if available
 		var mdTemplate string
+		var data dashboardData
+
 		if repoURL != "" && branch != "" {
-			// Get relative path from repo root to output directory
-			outputDir := filepath.Dir(mdOutput)
+			// For GitHub URLs, use paths with source prefix
 			mdTemplate = fmt.Sprintf(`# Files Dashboard
 {{range .Sections}}
 ## {{.Folder}}
 
 | File Name | Download | Source Zip |
 |-----------|----------|------------|
-{{range .Files}}| {{.Name}} | [Download](%s/%s/%s/{{.Path}}) | {{if .Zip}}[Zip](%s/%s/%s/{{.Zip}}){{else}}-{{end}} |
+{{range .Files}}| {{.Name}} | [Download](%s/%s/{{.Path}}) | {{if .Zip}}[Zip](%s/%s/{{.Zip}}){{else}}-{{end}} |
 {{end}}
-{{end}}`, repoURL, branch, outputDir, repoURL, branch, outputDir)
+{{end}}`, repoURL, branch, repoURL, branch)
+
+			data = dashboardData{
+				Sections:  githubSections,
+				RepoURL:   repoURL,
+				Branch:    branch,
+				OutputDir: outputDir,
+			}
 		} else {
-			// Fallback to relative URLs
+			// Fallback to relative URLs (relative to output file location)
 			mdTemplate = `# Files Dashboard
 {{range .Sections}}
 ## {{.Folder}}
@@ -210,13 +265,13 @@ func main() {
 {{range .Files}}| {{.Name}} | [Download]({{.Path}}) | {{if .Zip}}[Zip]({{.Zip}}){{else}}-{{end}} |
 {{end}}
 {{end}}`
-		}
 
-		data := dashboardData{
-			Sections:  ordered,
-			RepoURL:   repoURL,
-			Branch:    branch,
-			OutputDir: filepath.Dir(mdOutput),
+			data = dashboardData{
+				Sections:  adjustedSections,
+				RepoURL:   repoURL,
+				Branch:    branch,
+				OutputDir: outputDir,
+			}
 		}
 
 		mdTmpl := template.Must(template.New("markdown").Parse(mdTemplate))
