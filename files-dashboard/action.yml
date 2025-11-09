@@ -1,0 +1,27 @@
+name: 'Files Dashboard'
+description: 'Create HTML or Markdown dashboard with download links for generated files'
+author: 'kuzik'
+inputs:
+  source:
+    description: 'Source directory to scan'
+    required: true
+    default: 'output'
+  output:
+    description: 'Output file path (HTML or Markdown)'
+    required: true
+    default: 'output/index.md'
+  format:
+    description: 'Output format: html, markdown, or both'
+    required: false
+    default: 'markdown'
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  args:
+    - dashboard
+    - --source
+    - ${{ inputs.source }}
+    - --output
+    - ${{ inputs.output }}
+    - --format
+    - ${{ inputs.format }}

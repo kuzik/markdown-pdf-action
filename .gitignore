@@ -1,0 +1,53 @@
+# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go build artifacts
+*.test
+*.out
+go.work
+go.work.sum
+
+# Output directory
+example/output/
+rendered/
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+.DS_Store
+
+# IDE and editor files
+.vscode/
+.idea/
+*.iml
+*.code-workspace
+
+# Logs
+*.log
+
+# Backup files
+*.backup
+*.bak
+*.old
+
+# Environment variables
+.env
+.env.local
+
+# Docker volumes
+.docker/
+
+# Test coverage
+coverage.txt
+*.cover
+*.coverprofile
+
+# OS specific
+Thumbs.db
+desktop.ini
