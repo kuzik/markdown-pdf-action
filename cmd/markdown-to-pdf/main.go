@@ -172,19 +172,14 @@ func renderCombine(j job) error {
 		return fmt.Errorf("no README.md files found for %s", j.Source)
 	}
 
-	// Combine with folder headers
-	combined, err := combineREADMEsWithHeaders(readmes)
+	// Combine with folder headers, converting markdown to HTML for each README individually
+	// This ensures images are resolved relative to each README's directory
+	combined, err := combineREADMEsAsHTML(readmes)
 	if err != nil {
 		return err
 	}
 
-	// Use first README's directory as base for images
-	baseDir := ""
-	if len(readmes) > 0 {
-		baseDir = filepath.Dir(readmes[0])
-	}
-
-	return renderCombinedMarkdown(combined, j.Output, baseDir)
+	return renderCombinedHTML(combined, j.Output)
 }
 
 // findMatches finds all files matching the glob pattern
@@ -223,25 +218,63 @@ func combineMarkdownFiles(files []string, separator string) (string, error) {
 	return strings.Join(parts, separator), nil
 }
 
-// combineREADMEsWithHeaders combines README files with folder name headers
-func combineREADMEsWithHeaders(readmes []string) (string, error) {
-	var parts []string
+// combineREADMEsAsHTML converts each README to HTML (with images embedded) and combines them
+func combineREADMEsAsHTML(readmes []string) (string, error) {
+	var htmlParts []string
+
 	for _, readme := range readmes {
 		folder := filepath.Dir(readme)
 		folderName := filepath.Base(folder)
 
-		// Add folder name as header
-		parts = append(parts, fmt.Sprintf("# %s\n", folderName))
-
-		// Read and add content
+		// Read markdown content
 		content, err := os.ReadFile(readme)
 		if err != nil {
 			log.Printf("Warning: failed to read %s: %v", readme, err)
 			continue
 		}
-		parts = append(parts, string(content))
+
+		// Convert markdown to HTML
+		htmlBody, err := markdownToHTML(content)
+		if err != nil {
+			log.Printf("Warning: failed to convert markdown %s: %v", readme, err)
+			continue
+		}
+
+		// Embed images relative to this README's directory
+		htmlWithImages, err := embedImagesAsBase64(htmlBody, folder)
+		if err != nil {
+			log.Printf("Warning: failed to embed images for %s: %v", readme, err)
+			// Continue anyway with non-embedded images
+			htmlWithImages = htmlBody
+		}
+
+		// Add folder name as HTML header and the content
+		htmlParts = append(htmlParts, fmt.Sprintf("<h1 id=\"%s\">%s</h1>\n<hr>\n%s", folderName, folderName, htmlWithImages))
 	}
-	return strings.Join(parts, "\n\n---\n\n"), nil
+
+	return strings.Join(htmlParts, "\n\n"), nil
+}
+
+// renderCombinedHTML wraps combined HTML content and renders it to PDF
+func renderCombinedHTML(htmlContent, outputPath string) error {
+	// Wrap in styled HTML template
+	fullHTML, err := wrapHTML(htmlContent, "Combined")
+	if err != nil {
+		return fmt.Errorf("wrap HTML: %w", err)
+	}
+
+	// Ensure output directory exists
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return fmt.Errorf("create output directory: %w", err)
+	}
+
+	// Convert HTML to PDF
+	if err := htmlToPDF(fullHTML, outputPath); err != nil {
+		return fmt.Errorf("convert to PDF: %w", err)
+	}
+
+	log.Printf("Rendered: %s", outputPath)
+	return nil
 }
 
 // renderCombinedMarkdown writes combined markdown to a temp file and renders it
