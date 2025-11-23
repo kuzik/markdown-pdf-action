@@ -249,7 +249,7 @@ func combineREADMEsAsHTML(readmes []string) (string, error) {
 		}
 
 		// Add folder name as HTML header and the content
-		htmlParts = append(htmlParts, fmt.Sprintf("<h1 id=\"%s\">%s</h1>\n<hr>\n%s", folderName, folderName, htmlWithImages))
+		htmlParts = append(htmlParts, fmt.Sprintf("<div id=\"%s\" style=\"page-break-before: always; visibility:hidden\"></div>\n%s", folderName, htmlWithImages))
 	}
 
 	return strings.Join(htmlParts, "\n\n"), nil
