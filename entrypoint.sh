@@ -12,8 +12,11 @@ case "$cmd" in
   dashboard)
     exec /usr/local/bin/files-dashboard "$@"
     ;;
+  hydrate)
+    exec /usr/local/bin/template-hydrator "$@"
+    ;;
   *)
-    echo "Usage: run-action.sh [markdown|dashboard] <args>" >&2
+    echo "Usage: run-action.sh [markdown|dashboard|hydrate] <args>" >&2
     exit 2
     ;;
  esac

@@ -1,0 +1,30 @@
+{
+  "john-doe-physics": {
+    "Title": "Advanced Physics Exam",
+    "Student": {
+      "Name": "John Doe",
+      "ID": "STU-001",
+      "Class": "12A"
+    },
+    "ExamDate": "2024-05-20",
+    "Questions": [
+      {"Number": 1, "Text": "Explain the concept of entropy and its role in thermodynamics.", "Points": 25},
+      {"Number": 2, "Text": "Derive the Schrödinger equation for a particle in a box.", "Points": 35},
+      {"Number": 3, "Text": "Discuss the implications of quantum entanglement.", "Points": 40}
+    ]
+  },
+  "jane-smith-physics": {
+    "Title": "Advanced Physics Exam",
+    "Student": {
+      "Name": "Jane Smith",
+      "ID": "STU-002",
+      "Class": "12B"
+    },
+    "ExamDate": "2024-05-20",
+    "Questions": [
+      {"Number": 1, "Text": "Describe the photoelectric effect and its historical significance.", "Points": 25},
+      {"Number": 2, "Text": "Calculate the escape velocity for a planet with given mass and radius.", "Points": 35},
+      {"Number": 3, "Text": "Explain wave-particle duality with examples.", "Points": 40}
+    ]
+  }
+}

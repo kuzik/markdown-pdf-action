@@ -1,0 +1,20 @@
+<div class="exam-header">
+    <h1>{{ .Title }}</h1>
+    <p><strong>Date:</strong> {{ .ExamDate }}</p>
+</div>
+
+<div class="student-info">
+    <p><strong>Student:</strong> {{ .Student.Name }}</p>
+    <p><strong>ID:</strong> {{ .Student.ID }}</p>
+    <p><strong>Class:</strong> {{ .Student.Class }}</p>
+</div>
+
+<hr>
+
+{{ range .Questions }}
+<div class="question">
+    <h3>Question {{ .Number }} ({{ .Points }} points)</h3>
+    <p>{{ .Text }}</p>
+    <div class="answer-space" style="min-height: 100px; border-bottom: 1px solid #ccc;"></div>
+</div>
+{{ end }}

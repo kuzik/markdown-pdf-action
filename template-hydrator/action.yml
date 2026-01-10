@@ -1,0 +1,21 @@
+name: 'Template Hydrator'
+description: 'Generate batches of PDFs by merging a template with JSON data'
+author: 'kuzik'
+inputs:
+  template:
+    description: 'Path to the .html or .md template file'
+    required: true
+  data:
+    description: 'Path to the .json data file'
+    required: true
+  output:
+    description: 'Path to the directory where PDFs will be saved'
+    required: true
+runs:
+  using: 'docker'
+  image: 'docker://ghcr.io/kuzik/markdown-pdf-action:latest'
+  args:
+    - hydrate
+    - --template=${{ inputs.template }}
+    - --data=${{ inputs.data }}
+    - --output=${{ inputs.output }}

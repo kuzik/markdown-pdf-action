@@ -70,7 +70,60 @@ Renders Markdown files to PDF using headless Chrome with GitHub-flavored markdow
 - `single` - Combines all matched files into a single PDF
 - `combine` - Finds all README.md files matching the pattern and combines them into one PDF with folder names as section headers
 
-### 2. files-dashboard
+### 2. template-hydrator
+
+Generate batches of PDFs by merging a Go template with JSON data. Perfect for creating personalized documents like exams, certificates, or reports.
+
+**Features:**
+- ✅ Go text/template syntax support
+- ✅ HTML or Markdown templates
+- ✅ Batch generation from JSON data
+- ✅ Custom styling per document
+- ✅ Automatic PDF output
+
+**Usage:**
+
+```yaml
+- name: Hydrate Exam Templates
+  uses: kuzik/markdown-pdf-action/template-hydrator@v1
+  with:
+    template: "templates/exam.html"
+    data: "data/students.json"
+    output: "dist/exams"
+```
+
+**JSON Data Structure:**
+
+The input JSON must be a map where keys become output filenames:
+
+```json
+{
+  "exam_student_001": {
+    "StudentName": "John Doe",
+    "Subject": "Advanced Physics",
+    "Date": "2024-05-20",
+    "Question1": "Explain entropy..."
+  },
+  "exam_student_002": {
+    "StudentName": "Jane Smith",
+    "Subject": "Advanced Physics",
+    "Date": "2024-05-20",
+    "Question1": "Discuss thermodynamics..."
+  }
+}
+```
+
+**Template Example:**
+
+```html
+<h1>Exam: {{ .Subject }}</h1>
+<p>Student: {{ .StudentName }}</p>
+<p>Date: {{ .Date }}</p>
+<hr>
+<div>{{ .Question1 }}</div>
+```
+
+### 3. files-dashboard
 
 Creates an HTML dashboard with links to download all generated files.
 
@@ -105,9 +158,10 @@ Creates an HTML dashboard with links to download all generated files.
 # Install dependencies
 go mod download
 
-# Build both commands
+# Build all commands
 go build -o bin/markdown-to-pdf ./cmd/markdown-to-pdf
 go build -o bin/files-dashboard ./cmd/files-dashboard
+go build -o bin/template-hydrator ./cmd/template-hydrator
 
 # Build Docker image
 docker build -t markdown-pdf-action:local .
@@ -119,6 +173,7 @@ docker build -t markdown-pdf-action:local .
 # Run the test scripts (uses Docker)
 ./example/test-render.sh
 ./example/test-dashboard.sh
+./example/test-hydrator.sh
 
 # View results
 ls -lh example/output/
@@ -155,6 +210,10 @@ docker run -v $(pwd):/github/workspace markdown-pdf-action:local \
   type: "subfolders"
 '
 
+# Hydrate templates with data
+docker run -v $(pwd):/github/workspace markdown-pdf-action:local \
+  hydrate --template=templates/exam.html --data=data/students.json --output=dist/exams
+
 # Create dashboard
 docker run -v $(pwd):/github/workspace markdown-pdf-action:local \
   dashboard --source example/output --output example/output/index.html --format both
@@ -168,11 +227,14 @@ docker run -v $(pwd):/github/workspace markdown-pdf-action:local \
 │   ├── markdown-to-pdf/      # Markdown to PDF renderer
 │   │   ├── main.go
 │   │   └── template.html     # HTML template for PDF styling
-│   └── files-dashboard/      # HTML dashboard generator
+│   ├── files-dashboard/      # HTML dashboard generator
+│   │   ├── main.go
+│   │   ├── dashboard.html    # HTML template
+│   │   ├── dashboard-github.md
+│   │   └── dashboard-relative.md
+│   └── template-hydrator/    # Template hydration tool
 │       ├── main.go
-│       ├── dashboard.html    # HTML template
-│       ├── dashboard-github.md
-│       └── dashboard-relative.md
+│       └── template.html     # HTML wrapper template
 ├── internal/                 # Shared packages
 │   ├── templates/            # Template loading utilities
 │   ├── markdown/             # Markdown to HTML conversion
@@ -182,6 +244,8 @@ docker run -v $(pwd):/github/workspace markdown-pdf-action:local \
 ├── markdown-to-pdf/
 │   └── action.yml            # GitHub Action definition
 ├── files-dashboard/
+│   └── action.yml            # GitHub Action definition
+├── template-hydrator/
 │   └── action.yml            # GitHub Action definition
 ├── example/
 │   ├── input/                # Example markdown files

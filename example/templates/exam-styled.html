@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>{{ .Title }} - {{ .Student.Name }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 2cm;
+        }
+        body {
+            font-family: 'Times New Roman', serif;
+            font-size: 12pt;
+            line-height: 1.5;
+            color: #000;
+        }
+        .header {
+            text-align: center;
+            border-bottom: 2px solid #000;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24pt;
+        }
+        .header .subtitle {
+            font-size: 14pt;
+            color: #333;
+        }
+        .student-info {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+            padding: 15px;
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+        }
+        .student-info div {
+            flex: 1;
+        }
+        .question {
+            margin-bottom: 40px;
+            page-break-inside: avoid;
+        }
+        .question h3 {
+            background-color: #e0e0e0;
+            padding: 8px 15px;
+            margin: 0 0 15px 0;
+            border-left: 4px solid #333;
+        }
+        .question-text {
+            padding: 10px 15px;
+            margin-bottom: 15px;
+        }
+        .answer-box {
+            border: 1px solid #999;
+            min-height: 120px;
+            margin: 10px 0;
+            background-color: #fafafa;
+        }
+        .footer {
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            text-align: center;
+            font-size: 10pt;
+            color: #666;
+            border-top: 1px solid #ccc;
+            padding-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>{{ .Title }}</h1>
+        <p class="subtitle">Final Examination</p>
+    </div>
+
+    <div class="student-info">
+        <div>
+            <strong>Student Name:</strong> {{ .Student.Name }}<br>
+            <strong>Student ID:</strong> {{ .Student.ID }}<br>
+            <strong>Class:</strong> {{ .Student.Class }}
+        </div>
+        <div>
+            <strong>Date:</strong> {{ .ExamDate }}
+        </div>
+    </div>
+
+    {{ range .Questions }}
+    <div class="question">
+        <h3>Question {{ .Number }} ({{ .Points }} points)</h3>
+        <div class="question-text">{{ .Text }}</div>
+        <div class="answer-box"></div>
+    </div>
+    {{ end }}
+
+    <div class="footer">
+        {{ .Title }} | {{ .ExamDate }}
+    </div>
+</body>
+</html>
