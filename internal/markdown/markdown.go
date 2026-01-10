@@ -4,6 +4,7 @@ package markdown
 import (
 	"bytes"
 
+	mathjax "github.com/litao91/goldmark-mathjax"
 	"github.com/yuin/goldmark"
 	highlighting "github.com/yuin/goldmark-highlighting/v2"
 	"github.com/yuin/goldmark/extension"
@@ -21,6 +22,7 @@ func DefaultConverter() *Converter {
 	md := goldmark.New(
 		goldmark.WithExtensions(
 			extension.GFM,
+			mathjax.MathJax,
 			highlighting.NewHighlighting(
 				highlighting.WithStyle("github"),
 				highlighting.WithFormatOptions(),
