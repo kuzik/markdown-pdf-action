@@ -11,6 +11,9 @@ inputs:
   output:
     description: 'Path to the directory where PDFs will be saved'
     required: true
+  images:
+    description: 'Base path for resolving image paths (defaults to template directory)'
+    required: false
 runs:
   using: 'docker'
   image: 'docker://ghcr.io/kuzik/markdown-pdf-action:latest'
@@ -19,3 +22,4 @@ runs:
     - --template=${{ inputs.template }}
     - --data=${{ inputs.data }}
     - --output=${{ inputs.output }}
+    - --images=${{ inputs.images }}

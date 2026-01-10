@@ -9,24 +9,24 @@ cd "$(dirname "$0")/.."
 echo "=== Test 1: Simple HTML template (wrapped with base styles) ==="
 docker run --rm -v "$(pwd):/github/workspace" markdown-pdf-action:local \
   hydrate \
-  --template="example/templates/exam.html" \
-  --data="example/data/exams.json" \
+  --template="example/input/exam.html" \
+  --data="example/input/exams.json" \
   --output="example/output/exams"
 
 echo ""
 echo "=== Test 2: Complete HTML template with custom styles (used directly) ==="
 docker run --rm -v "$(pwd):/github/workspace" markdown-pdf-action:local \
   hydrate \
-  --template="example/templates/exam-styled.html" \
-  --data="example/data/exams-styled.json" \
+  --template="example/input/exam-styled.html" \
+  --data="example/input/exams.json" \
   --output="example/output/exams-styled"
 
 echo ""
 echo "=== Test 3: Markdown template (wrapped with base styles) ==="
 docker run --rm -v "$(pwd):/github/workspace" markdown-pdf-action:local \
   hydrate \
-  --template="example/templates/exam.md" \
-  --data="example/data/exams.json" \
+  --template="example/input/exam.md" \
+  --data="example/input/exams.json" \
   --output="example/output/exams-md"
 
 echo ""

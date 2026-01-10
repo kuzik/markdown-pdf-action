@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kuzik/pandoc-latex-docker/internal/images"
 	"github.com/kuzik/pandoc-latex-docker/internal/markdown"
 	"github.com/kuzik/pandoc-latex-docker/internal/pdf"
 	"github.com/kuzik/pandoc-latex-docker/internal/templates"
@@ -39,15 +40,23 @@ func main() {
 		templatePath string
 		dataPath     string
 		outputDir    string
+		imagesDir    string
 	)
 
 	flag.StringVar(&templatePath, "template", "", "Path to the .html or .md template file")
 	flag.StringVar(&dataPath, "data", "", "Path to the .json data file")
 	flag.StringVar(&outputDir, "output", "", "Path to the directory where PDFs will be saved")
+	flag.StringVar(&imagesDir, "images", "", "Base path for resolving image paths (defaults to template directory)")
 	flag.Parse()
 
 	if templatePath == "" || dataPath == "" || outputDir == "" {
 		log.Fatal("--template, --data, and --output must all be provided")
+	}
+
+	// Determine base directory for images
+	imageBasePath := imagesDir
+	if imageBasePath == "" {
+		imageBasePath = filepath.Dir(templatePath)
 	}
 
 	// Load template
@@ -84,7 +93,7 @@ func main() {
 
 	// Process each entry
 	for name, data := range dataMap {
-		if err := renderDocument(tmpl, data, name, outputDir, isMarkdown); err != nil {
+		if err := renderDocument(tmpl, data, name, outputDir, isMarkdown, imageBasePath); err != nil {
 			log.Printf("Failed to render %s: %v", name, err)
 			continue
 		}
@@ -93,7 +102,7 @@ func main() {
 }
 
 // renderDocument renders a single document from template and data
-func renderDocument(tmpl *template.Template, data any, name, outputDir string, isMarkdown bool) error {
+func renderDocument(tmpl *template.Template, data any, name, outputDir string, isMarkdown bool, imageBasePath string) error {
 	// Execute template with data
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, data); err != nil {
@@ -109,6 +118,12 @@ func renderDocument(tmpl *template.Template, data any, name, outputDir string, i
 			return fmt.Errorf("convert markdown: %w", err)
 		}
 		content = html
+	}
+
+	// Embed images as base64 data URLs
+	content, err := images.EmbedImagesAsBase64(content, imageBasePath)
+	if err != nil {
+		return fmt.Errorf("embed images: %w", err)
 	}
 
 	var fullHTML string
@@ -127,7 +142,6 @@ func renderDocument(tmpl *template.Template, data any, name, outputDir string, i
 			}
 		}
 
-		var err error
 		fullHTML, err = wrapHTML(content, title)
 		if err != nil {
 			return fmt.Errorf("wrap HTML: %w", err)
