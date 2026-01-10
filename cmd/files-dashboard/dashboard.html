@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8"/>
+	<title>Files Dashboard</title>
+	<style>
+		body { font-family: Arial, sans-serif; margin: 20px; }
+		table { border-collapse: collapse; width: 100%; margin-bottom: 30px; }
+		th, td { border: 1px solid #ddd; padding: 6px; }
+		th { background: #f4f4f4; text-align: left; }
+		h2 { margin-top: 40px; border-bottom: 2px solid #eee; padding-bottom: 4px; }
+		a { text-decoration: none; color: #0366d6; }
+		a:hover { text-decoration: underline; }
+	</style>
+</head>
+<body>
+	<h1>Files Dashboard</h1>
+	{{range .}}
+	<h2>{{.Folder}}</h2>
+	<table>
+		<thead>
+			<tr>
+				<th>File Name</th>
+				<th>Download</th>
+				<th>Source Zip</th>
+			</tr>
+		</thead>
+		<tbody>
+			{{range .Files}}
+			<tr>
+				<td>{{.Name}}</td>
+				<td><a href="{{.Path}}" download>Download</a></td>
+				<td>{{if .Zip}}<a href="{{.Zip}}" download>Zip</a>{{else}}-{{end}}</td>
+			</tr>
+			{{end}}
+		</tbody>
+	</table>
+	{{end}}
+</body>
+</html>

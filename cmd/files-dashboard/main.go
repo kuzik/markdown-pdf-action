@@ -1,9 +1,9 @@
 package main
 
 import (
+	"embed"
 	"flag"
 	"fmt"
-	"html/template"
 	"log"
 	"net/url"
 	"os"
@@ -11,12 +11,19 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/kuzik/pandoc-latex-docker/internal/templates"
 )
 
+//go:embed dashboard.html dashboard-github.md dashboard-relative.md
+var templateFS embed.FS
+
 type fileEntry struct {
-	Name string
-	Path string
-	Zip  string
+	Name    string
+	Path    string
+	Zip     string
+	RepoURL string
+	Branch  string
 }
 
 type section struct {
@@ -25,16 +32,19 @@ type section struct {
 }
 
 type dashboardData struct {
-	Sections  []section
-	RepoURL   string
-	Branch    string
-	OutputDir string
+	Sections []section
 }
 
 type config struct {
 	source string
 	output string
 	format string
+}
+
+var tmplLoader *templates.EmbeddedLoader
+
+func init() {
+	tmplLoader = templates.NewEmbeddedLoader(templateFS)
 }
 
 // urlEncodePath encodes a file path for use in URLs
@@ -212,7 +222,7 @@ func adjustPathsForOutput(sections []section, source, outputDir string, urlEncod
 }
 
 // prepareGitHubSections prepares sections with GitHub raw URLs
-func prepareGitHubSections(sections []section, source string) []section {
+func prepareGitHubSections(sections []section, source, repoURL, branch string) []section {
 	githubSections := make([]section, len(sections))
 
 	for i, sec := range sections {
@@ -225,9 +235,11 @@ func prepareGitHubSections(sections []section, source string) []section {
 			}
 
 			githubFiles[j] = fileEntry{
-				Name: file.Name,
-				Path: urlEncodePath(filepath.Join(source, file.Path)),
-				Zip:  zipPath,
+				Name:    file.Name,
+				Path:    urlEncodePath(filepath.Join(source, file.Path)),
+				Zip:     zipPath,
+				RepoURL: repoURL,
+				Branch:  branch,
 			}
 		}
 
@@ -261,7 +273,11 @@ func generateHTML(cfg config, sections []section) error {
 	}
 	defer f.Close()
 
-	tmpl := template.Must(template.New("dashboard").Parse(htmlTemplate))
+	tmpl, err := tmplLoader.Load("dashboard.html")
+	if err != nil {
+		return fmt.Errorf("load HTML template: %w", err)
+	}
+
 	if err := tmpl.Execute(f, adjustedSections); err != nil {
 		return fmt.Errorf("execute HTML template: %w", err)
 	}
@@ -281,40 +297,37 @@ func generateMarkdown(cfg config, sections []section, repoURL, branch string) er
 		return fmt.Errorf("create output directory: %w", err)
 	}
 
-	outputDir := filepath.Dir(mdOutput)
-
 	mdFile, err := os.Create(mdOutput)
 	if err != nil {
 		return fmt.Errorf("create markdown file: %w", err)
 	}
 	defer mdFile.Close()
 
-	var tmplStr string
+	var tmplName string
 	var data dashboardData
 
 	if repoURL != "" && branch != "" {
 		// Use GitHub raw URLs
-		githubSections := prepareGitHubSections(sections, cfg.source)
-		tmplStr = fmt.Sprintf(markdownTemplateGitHub, repoURL, branch, repoURL, branch)
+		githubSections := prepareGitHubSections(sections, cfg.source, repoURL, branch)
+		tmplName = "dashboard-github.md"
 		data = dashboardData{
-			Sections:  githubSections,
-			RepoURL:   repoURL,
-			Branch:    branch,
-			OutputDir: outputDir,
+			Sections: githubSections,
 		}
 	} else {
 		// Use relative URLs
+		outputDir := filepath.Dir(mdOutput)
 		adjustedSections := adjustPathsForOutput(sections, cfg.source, outputDir, true)
-		tmplStr = markdownTemplateRelative
+		tmplName = "dashboard-relative.md"
 		data = dashboardData{
-			Sections:  adjustedSections,
-			RepoURL:   repoURL,
-			Branch:    branch,
-			OutputDir: outputDir,
+			Sections: adjustedSections,
 		}
 	}
 
-	tmpl := template.Must(template.New("markdown").Parse(tmplStr))
+	tmpl, err := tmplLoader.Load(tmplName)
+	if err != nil {
+		return fmt.Errorf("load markdown template: %w", err)
+	}
+
 	if err := tmpl.Execute(mdFile, data); err != nil {
 		return fmt.Errorf("execute markdown template: %w", err)
 	}
@@ -358,64 +371,3 @@ func main() {
 		}
 	}
 }
-
-const htmlTemplate = `<!DOCTYPE html>
-<html>
-<head>
-	<meta charset="utf-8"/>
-	<title>Files Dashboard</title>
-	<style>
-		body { font-family: Arial, sans-serif; margin: 20px; }
-		table { border-collapse: collapse; width: 100%; margin-bottom: 30px; }
-		th, td { border: 1px solid #ddd; padding: 6px; }
-		th { background: #f4f4f4; text-align: left; }
-		h2 { margin-top: 40px; border-bottom: 2px solid #eee; padding-bottom: 4px; }
-		a { text-decoration: none; color: #0366d6; }
-		a:hover { text-decoration: underline; }
-	</style>
-</head>
-<body>
-	<h1>Files Dashboard</h1>
-	{{range .}}
-	<h2>{{.Folder}}</h2>
-	<table>
-		<thead>
-			<tr>
-				<th>File Name</th>
-				<th>Download</th>
-				<th>Source Zip</th>
-			</tr>
-		</thead>
-		<tbody>
-			{{range .Files}}
-			<tr>
-				<td>{{.Name}}</td>
-				<td><a href="{{.Path}}" download>Download</a></td>
-				<td>{{if .Zip}}<a href="{{.Zip}}" download>Zip</a>{{else}}-{{end}}</td>
-			</tr>
-			{{end}}
-		</tbody>
-	</table>
-	{{end}}
-</body>
-</html>`
-
-const markdownTemplateGitHub = `# Files Dashboard
-{{range .Sections}}
-## {{.Folder}}
-
-| File Name | Download | Source Zip |
-|-----------|----------|------------|
-{{range .Files}}| {{.Name}} | [Download](%s/%s/{{.Path}}) | {{if .Zip}}[Zip](%s/%s/{{.Zip}}){{else}}-{{end}} |
-{{end}}
-{{end}}`
-
-const markdownTemplateRelative = `# Files Dashboard
-{{range .Sections}}
-## {{.Folder}}
-
-| File Name | Download | Source Zip |
-|-----------|----------|------------|
-{{range .Files}}| {{.Name}} | [Download]({{.Path}}) | {{if .Zip}}[Zip]({{.Zip}}){{else}}-{{end}} |
-{{end}}
-{{end}}`
