@@ -4,6 +4,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ cmd/
+COPY internal/ internal/
 RUN CGO_ENABLED=0 go build -o /out/markdown-to-pdf ./cmd/markdown-to-pdf && \
     CGO_ENABLED=0 go build -o /out/files-dashboard ./cmd/files-dashboard
 

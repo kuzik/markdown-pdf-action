@@ -32,10 +32,16 @@ Renders Markdown files to PDF using headless Chrome with GitHub-flavored markdow
 - name: Render Markdown to PDF
   uses: kuzik/markdown-pdf-action/markdown-to-pdf@v1
   with:
-    config: render.yaml
+    config: |
+      - source: "docs/**/*.md"
+        output: "output/docs/"
+        type: "subfolders"
+      - source: "README.md"
+        output: "output/README.pdf"
+        type: "single"
 ```
 
-**Configuration File (`render.yaml`):**
+**Configuration (inline YAML):**
 
 ```yaml
 # Render all README.md files in subdirectories separately
@@ -91,7 +97,7 @@ Creates an HTML dashboard with links to download all generated files.
 ### Prerequisites
 
 - Go 1.25 or later
-- Docker (optional, for image building)
+- Docker (required for PDF rendering with Chrome)
 
 ### Build Locally
 
@@ -102,16 +108,17 @@ go mod download
 # Build both commands
 go build -o bin/markdown-to-pdf ./cmd/markdown-to-pdf
 go build -o bin/files-dashboard ./cmd/files-dashboard
+
+# Build Docker image
+docker build -t markdown-pdf-action:local .
 ```
 
 ### Test with Example
 
 ```bash
-# Render the example markdown
-./bin/markdown-to-pdf --config example/render.example.yaml
-
-# Create dashboard
-./bin/files-dashboard --source example/output --output example/output/index.md --format markdown
+# Run the test scripts (uses Docker)
+./example/test-render.sh
+./example/test-dashboard.sh
 
 # View results
 ls -lh example/output/
@@ -140,13 +147,17 @@ The Dockerfile uses multi-stage builds:
 ### Run Locally
 
 ```bash
-# Render markdown
-docker run -v $(pwd):/github/workspace markdown-pdf-action \
-  markdown --config example/render.example.yaml
+# Render markdown with inline config
+docker run -v $(pwd):/github/workspace markdown-pdf-action:local \
+  markdown --config='
+- source: "example/input/**/*.md"
+  output: "example/output/"
+  type: "subfolders"
+'
 
 # Create dashboard
-docker run -v $(pwd):/github/workspace markdown-pdf-action \
-  dashboard --source output --output output/index.md --format markdown
+docker run -v $(pwd):/github/workspace markdown-pdf-action:local \
+  dashboard --source example/output --output example/output/index.html --format both
 ```
 
 ## 📁 Repository Structure
@@ -154,18 +165,29 @@ docker run -v $(pwd):/github/workspace markdown-pdf-action \
 ```
 .
 ├── cmd/
-│   ├── markdown-to-pdf/     # Markdown to PDF renderer
-│   │   └── main.go
+│   ├── markdown-to-pdf/      # Markdown to PDF renderer
+│   │   ├── main.go
+│   │   └── template.html     # HTML template for PDF styling
 │   └── files-dashboard/      # HTML dashboard generator
-│       └── main.go
+│       ├── main.go
+│       ├── dashboard.html    # HTML template
+│       ├── dashboard-github.md
+│       └── dashboard-relative.md
+├── internal/                 # Shared packages
+│   ├── templates/            # Template loading utilities
+│   ├── markdown/             # Markdown to HTML conversion
+│   ├── images/               # Image embedding (base64)
+│   ├── pdf/                  # PDF generation with Chrome
+│   └── ziputil/              # Zip archive utilities
 ├── markdown-to-pdf/
 │   └── action.yml            # GitHub Action definition
 ├── files-dashboard/
 │   └── action.yml            # GitHub Action definition
 ├── example/
-│   ├── README.md             # Example markdown with all features
-│   ├── render.yaml           # Example configuration
-│   └── src/                  # Example source files for zipping
+│   ├── input/                # Example markdown files
+│   ├── output/               # Generated output
+│   ├── test-render.sh        # Test script for rendering
+│   └── test-dashboard.sh     # Test script for dashboard
 ├── Dockerfile                # Multi-stage Docker build
 ├── entrypoint.sh             # Action entrypoint script
 ├── go.mod                    # Go dependencies
