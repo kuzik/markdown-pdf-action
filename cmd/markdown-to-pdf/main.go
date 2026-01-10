@@ -50,25 +50,24 @@ func init() {
 }
 
 func main() {
-	var configPath string
-	flag.StringVar(&configPath, "config", "render.yaml", "Path to YAML config describing render jobs")
+	var configYAML string
+	flag.StringVar(&configYAML, "config", "", "YAML config string describing render jobs")
 	flag.Parse()
 
-	jobs, err := loadConfig(configPath)
+	if configYAML == "" {
+		log.Fatal("--config must be provided")
+	}
+
+	jobs, err := parseConfig([]byte(configYAML))
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		log.Fatalf("Failed to parse config: %v", err)
 	}
 
 	executeJobs(jobs)
 }
 
-// loadConfig reads and parses the YAML configuration file
-func loadConfig(configPath string) ([]job, error) {
-	cfgBytes, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
-	}
-
+// parseConfig parses YAML config bytes into jobs
+func parseConfig(cfgBytes []byte) ([]job, error) {
 	var jobs []job
 	if err := yaml.Unmarshal(cfgBytes, &jobs); err != nil {
 		return nil, fmt.Errorf("parse yaml: %w", err)

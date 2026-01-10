@@ -3,13 +3,11 @@ description: 'Render markdown to PDF using headless Chrome with GitHub-style for
 author: 'kuzik'
 inputs:
   config:
-    description: 'Path to YAML config file describing render jobs'
+    description: 'YAML config string describing render jobs'
     required: true
-    default: 'render.yaml'
 runs:
   using: 'docker'
   image: 'docker://ghcr.io/kuzik/markdown-pdf-action:latest'
   args:
     - markdown
-    - --config
-    - ${{ inputs.config }}
+    - --config=${{ inputs.config }}
