@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -174,15 +175,16 @@ func renderCombine(j job) error {
 		return fmt.Errorf("create output directory: %w", err)
 	}
 
-	// Filter only README.md files
-	readmes := filterREADMEs(matches)
-	if len(readmes) == 0 {
-		return fmt.Errorf("no README.md files found for %s", j.Source)
+	// Select the markdown files to combine: README.md files when present
+	// (preserving folder-based grouping), otherwise all matched markdown files.
+	files := selectCombineFiles(matches)
+	if len(files) == 0 {
+		return fmt.Errorf("no markdown files found for %s", j.Source)
 	}
 
-	// Combine with folder headers, converting markdown to HTML for each README individually
-	// This ensures images are resolved relative to each README's directory
-	combined, err := combineREADMEsAsHTML(readmes)
+	// Combine with a page break before each section, converting markdown to HTML
+	// for each file individually so images resolve relative to that file's directory.
+	combined, err := combineMarkdownAsHTML(files)
 	if err != nil {
 		return err
 	}
@@ -202,15 +204,39 @@ func findMatches(pattern string) ([]string, error) {
 	return matches, nil
 }
 
-// filterREADMEs returns only README.md files from the list
-func filterREADMEs(files []string) []string {
-	var readmes []string
+// selectCombineFiles chooses which markdown files to combine, sorted by path.
+// When any README.md files are present it uses only those (preserving the
+// folder-per-section convention); otherwise it falls back to every matched
+// markdown file, so flat collections like assessment/01.md..30.md also combine.
+func selectCombineFiles(files []string) []string {
+	var readmes, markdown []string
 	for _, f := range files {
 		if filepath.Base(f) == "README.md" {
 			readmes = append(readmes, f)
 		}
+		if strings.EqualFold(filepath.Ext(f), ".md") {
+			markdown = append(markdown, f)
+		}
 	}
-	return readmes
+
+	selected := markdown
+	if len(readmes) > 0 {
+		selected = readmes
+	}
+
+	sort.Strings(selected)
+	return selected
+}
+
+// sectionID returns a stable anchor id for a combined section. README.md files
+// are identified by their parent folder name; flat files by their base name
+// without the extension (so assessment/01.md becomes "01").
+func sectionID(path string) string {
+	if filepath.Base(path) == "README.md" {
+		return filepath.Base(filepath.Dir(path))
+	}
+	name := filepath.Base(path)
+	return strings.TrimSuffix(name, filepath.Ext(name))
 }
 
 // combineMarkdownFiles reads and combines multiple markdown files
@@ -226,38 +252,39 @@ func combineMarkdownFiles(files []string, separator string) (string, error) {
 	return strings.Join(parts, separator), nil
 }
 
-// combineREADMEsAsHTML converts each README to HTML (with images embedded) and combines them
-func combineREADMEsAsHTML(readmes []string) (string, error) {
+// combineMarkdownAsHTML converts each markdown file to HTML (with images
+// embedded) and combines them, inserting a page break before each section so
+// every source file starts on its own page.
+func combineMarkdownAsHTML(files []string) (string, error) {
 	var htmlParts []string
 
-	for _, readme := range readmes {
-		folder := filepath.Dir(readme)
-		folderName := filepath.Base(folder)
+	for _, file := range files {
+		folder := filepath.Dir(file)
 
 		// Read markdown content
-		content, err := os.ReadFile(readme)
+		content, err := os.ReadFile(file)
 		if err != nil {
-			log.Printf("Warning: failed to read %s: %v", readme, err)
+			log.Printf("Warning: failed to read %s: %v", file, err)
 			continue
 		}
 
 		// Convert markdown to HTML
 		htmlBody, err := mdConverter.ToHTML(content)
 		if err != nil {
-			log.Printf("Warning: failed to convert markdown %s: %v", readme, err)
+			log.Printf("Warning: failed to convert markdown %s: %v", file, err)
 			continue
 		}
 
-		// Embed images relative to this README's directory
+		// Embed images relative to this file's directory
 		htmlWithImages, err := images.EmbedImagesAsBase64(htmlBody, folder)
 		if err != nil {
-			log.Printf("Warning: failed to embed images for %s: %v", readme, err)
+			log.Printf("Warning: failed to embed images for %s: %v", file, err)
 			// Continue anyway with non-embedded images
 			htmlWithImages = htmlBody
 		}
 
-		// Add folder name as HTML header and the content
-		htmlParts = append(htmlParts, fmt.Sprintf("<div id=\"%s\" style=\"page-break-before: always; visibility:hidden\"></div>\n%s", folderName, htmlWithImages))
+		// Prefix each section with a page break anchor so it starts a new page
+		htmlParts = append(htmlParts, fmt.Sprintf("<div id=\"%s\" style=\"page-break-before: always; visibility:hidden\"></div>\n%s", sectionID(file), htmlWithImages))
 	}
 
 	return strings.Join(htmlParts, "\n\n"), nil
