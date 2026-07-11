@@ -33,7 +33,7 @@ jobs:
 
       - name: 🏷️ Determine image tags
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }} # The image name will be based on the repo name (e.g., ghcr.io/your_user/pandoc-latex-docker)
           tags: |
