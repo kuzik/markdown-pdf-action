@@ -2,9 +2,9 @@ name: Build and Publish Docker Image to GHCR
 
 on:
   push:
-    branches:
-      - master # Trigger on pushes to the main branch
-  workflow_dispatch: # Allows manual triggering
+    tags:
+      - 'v*.*.*' # Trigger only on semver tag pushes
+  workflow_dispatch: # Allows manual triggering (run against a tag ref)
 
 jobs:
   build-and-push:
@@ -37,8 +37,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }} # The image name will be based on the repo name (e.g., ghcr.io/your_user/pandoc-latex-docker)
           tags: |
-            type=raw,value=latest
-            type=sha,format=short
+            type=semver,pattern={{version}}
 
       - name: 🔨 Build and Push Docker image
         uses: docker/build-push-action@v5
