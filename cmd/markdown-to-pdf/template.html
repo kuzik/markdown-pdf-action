@@ -128,6 +128,9 @@
         .chroma .nb { color: #005cc5; }
         .chroma .bp { color: #005cc5; }
     </style>
+    {{if .CSS}}<style>
+{{.CSS}}
+    </style>{{end}}
 </head>
 <body>
 {{.Content}}

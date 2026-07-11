@@ -70,6 +70,28 @@ Renders Markdown files to PDF using headless Chrome with GitHub-flavored markdow
 - `single` - Combines all matched files into a single PDF
 - `combine` - Finds all README.md files matching the pattern and combines them into one PDF with folder names as section headers
 
+**Custom CSS (optional `css` field):**
+
+Each job may set a `css` field to override the built-in GitHub-like styles. The
+CSS is injected *after* the base stylesheet, so it wins on any conflict. Works
+with every `type`. The value is either a path to a `.css` file (relative to the
+repository root) or a block of inline CSS:
+
+```yaml
+# Inline CSS — e.g. justified text for lecture handouts
+- source: "lectures/**/README.md"
+  output: "output/lectures/"
+  type: "subfolders"
+  css: |
+    body { text-align: justify; hyphens: auto; }
+
+# Or point at a stylesheet file
+- source: "lectures/**/README.md"
+  output: "output/lectures.pdf"
+  type: "combine"
+  css: "styles/lectures.css"
+```
+
 ### 2. template-hydrator
 
 Generate batches of PDFs by merging a Go template with JSON data. Perfect for creating personalized documents like exams, certificates, or reports.

@@ -27,17 +27,23 @@ type job struct {
 	Source string `yaml:"source"`
 	Output string `yaml:"output"`
 	Type   string `yaml:"type"` // single | subfolders | combine
+	// CSS is optional extra styling injected after the base stylesheet, so it
+	// overrides defaults. It may be either a path to a .css file (relative to
+	// the working directory) or a literal block of CSS written inline.
+	CSS string `yaml:"css"`
 }
 
 type renderConfig struct {
 	mdPath  string
 	outPath string
 	baseDir string
+	css     string
 }
 
 type pageData struct {
 	Title   string
 	Content template.HTML
+	CSS     template.CSS
 }
 
 var (
@@ -111,6 +117,8 @@ func renderSubfolders(j job) error {
 		return fmt.Errorf("create output directory: %w", err)
 	}
 
+	css := resolveCSS(j.CSS)
+
 	for _, m := range matches {
 		if filepath.Base(m) != "README.md" {
 			continue
@@ -124,6 +132,7 @@ func renderSubfolders(j job) error {
 			mdPath:  m,
 			outPath: outPDF,
 			baseDir: folder,
+			css:     css,
 		}); err != nil {
 			log.Printf("Render %s: %v", m, err)
 			continue
@@ -161,7 +170,7 @@ func renderSingle(j job) error {
 		baseDir = filepath.Dir(matches[0])
 	}
 
-	return renderCombinedMarkdown(combined, j.Output, baseDir)
+	return renderCombinedMarkdown(combined, j.Output, baseDir, resolveCSS(j.CSS))
 }
 
 // renderCombine merges multiple README.md files with folder headers into a single PDF
@@ -189,7 +198,7 @@ func renderCombine(j job) error {
 		return err
 	}
 
-	return renderCombinedHTML(combined, j.Output)
+	return renderCombinedHTML(combined, j.Output, resolveCSS(j.CSS))
 }
 
 // findMatches finds all files matching the glob pattern
@@ -291,9 +300,9 @@ func combineMarkdownAsHTML(files []string) (string, error) {
 }
 
 // renderCombinedHTML wraps combined HTML content and renders it to PDF
-func renderCombinedHTML(htmlContent, outputPath string) error {
+func renderCombinedHTML(htmlContent, outputPath, css string) error {
 	// Wrap in styled HTML template
-	fullHTML, err := wrapHTML(htmlContent, "Combined")
+	fullHTML, err := wrapHTML(htmlContent, "Combined", css)
 	if err != nil {
 		return fmt.Errorf("wrap HTML: %w", err)
 	}
@@ -313,7 +322,7 @@ func renderCombinedHTML(htmlContent, outputPath string) error {
 }
 
 // renderCombinedMarkdown writes combined markdown to a temp file and renders it
-func renderCombinedMarkdown(content, outputPath, baseDir string) error {
+func renderCombinedMarkdown(content, outputPath, baseDir, css string) error {
 	tmpFile, err := os.CreateTemp("", "combined-*.md")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
@@ -330,6 +339,7 @@ func renderCombinedMarkdown(content, outputPath, baseDir string) error {
 		mdPath:  tmpFile.Name(),
 		outPath: outputPath,
 		baseDir: baseDir,
+		css:     css,
 	})
 }
 
@@ -371,7 +381,7 @@ func renderMarkdownToPDF(cfg renderConfig) error {
 	}
 
 	// Wrap in styled HTML template
-	htmlContent, err := wrapHTML(htmlWithImages, filepath.Base(cfg.mdPath))
+	htmlContent, err := wrapHTML(htmlWithImages, filepath.Base(cfg.mdPath), cfg.css)
 	if err != nil {
 		return fmt.Errorf("wrap HTML: %w", err)
 	}
@@ -390,12 +400,36 @@ func renderMarkdownToPDF(cfg renderConfig) error {
 	return nil
 }
 
-// wrapHTML wraps HTML content in a styled template
-func wrapHTML(content, title string) (string, error) {
+// wrapHTML wraps HTML content in a styled template. The css argument holds
+// extra stylesheet text (already resolved from a file or inline value) that is
+// injected after the base styles so it can override them.
+func wrapHTML(content, title, css string) (string, error) {
 	data := pageData{
 		Title:   title,
 		Content: template.HTML(content),
+		CSS:     template.CSS(css),
 	}
 
 	return tmplLoader.Render("template.html", data)
+}
+
+// resolveCSS turns a job's css value into stylesheet text. When the value names
+// an existing file its contents are read; otherwise the value is treated as
+// literal inline CSS. An empty value yields an empty string (no extra styles).
+func resolveCSS(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+
+	if info, err := os.Stat(value); err == nil && !info.IsDir() {
+		content, err := os.ReadFile(value)
+		if err != nil {
+			log.Printf("Warning: failed to read css file %s: %v", value, err)
+			return ""
+		}
+		return string(content)
+	}
+
+	// Not a file path — treat the value itself as CSS.
+	return value
 }
