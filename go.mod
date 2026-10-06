@@ -1,10 +1,10 @@
 module github.com/kuzik/pandoc-latex-docker
 
-go 1.26
+go 1.27
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.6.1
-	github.com/chromedp/cdproto v0.0.0-20260321001828-e3e3800016bc
+	github.com/chromedp/cdproto v0.157.1
 	github.com/chromedp/chromedp v0.15.1
 	github.com/litao91/goldmark-mathjax v0.0.0-20210217064022-a43cf739a50f
 	github.com/yuin/goldmark v1.7.4
@@ -14,7 +14,6 @@ require (
 
 require (
 	github.com/alecthomas/chroma/v2 v2.2.0 // indirect
-	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/dlclark/regexp2 v1.7.0 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
